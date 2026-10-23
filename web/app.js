@@ -629,6 +629,12 @@ window.muShowToast = function (msg, duration) {
 window.muAutoAttackActive = false;
 window.muAutoAttackInterval = null;
 
+// Smart Auto-Attack Parameters
+var MU_SWEEP_RADIUS_X = 75; // Isometric horizontal radius in pixels
+var MU_SWEEP_RADIUS_Y = 48; // Isometric vertical radius in pixels (compressed for 45 deg tilt)
+var MU_CENTER_X = 320;
+var MU_CENTER_Y = 240;
+
 window.muToggleAutoAttack = function () {
   window.muAutoAttackActive = !window.muAutoAttackActive;
   var on = window.muAutoAttackActive;
@@ -642,35 +648,91 @@ window.muToggleAutoAttack = function () {
   if (playIcon) playIcon.style.display = on ? 'none' : 'block';
   if (stopIcon) stopIcon.style.display = on ? 'block' : 'none';
   if (textSpan) textSpan.textContent = on ? 'Stop' : 'Auto';
-  if (btn) btn.title = on ? 'Stop Auto-Attack (Currently Active)' : 'Start Auto-Attack (Hold RMB at Center)';
+  if (btn) btn.title = on ? 'Stop Auto-Attack (Smart Sweep 360° + Aggro Pulse)' : 'Start Auto-Attack (Smart Sweep 360° + Aggro Pulse)';
 
-  // 1. Call native C++ auto-attack export if available
+  // Disable static C++ center lock so our smart cursor sweep has full authority
   if (typeof Module !== 'undefined' && Module._mu_auto_attack) {
-    Module._mu_auto_attack(on ? 1 : 0);
+    Module._mu_auto_attack(0);
   }
 
-  // 2. High-reliability JS loop fallback
   if (on) {
-    if (typeof Module !== 'undefined') {
-      if (Module._mu_cursor) Module._mu_cursor(320, 240);
-      if (Module._mu_rbutton) Module._mu_rbutton(1);
-    }
     if (window.muAutoAttackInterval) clearInterval(window.muAutoAttackInterval);
+
+    var angle = 0;
+    var state = 'SWEEP'; // 'SWEEP', 'STEP_OUT', 'STEP_BACK'
+    var subTicks = 0;
+    var sweepTicks = 0;
+    var pulseCycle = 0;
+    var stepDirX = 50;
+    var stepDirY = 0;
+
+    // 60ms loop (~16.6 iterations per second for smooth rotation)
     window.muAutoAttackInterval = setInterval(function () {
-      if (!window.muAutoAttackActive) return;
-      if (typeof Module !== 'undefined') {
-        if (Module._mu_cursor) Module._mu_cursor(320, 240);
+      if (!window.muAutoAttackActive || typeof Module === 'undefined') return;
+
+      if (state === 'SWEEP') {
+        // 1. Varredura Circular (Sweep 360°) com projeção isométrica
+        angle = (angle + 0.35) % (Math.PI * 2);
+        var curX = Math.round(MU_CENTER_X + Math.cos(angle) * MU_SWEEP_RADIUS_X);
+        var curY = Math.round(MU_CENTER_Y + Math.sin(angle) * MU_SWEEP_RADIUS_Y);
+
+        if (Module._mu_cursor) Module._mu_cursor(curX, curY);
         if (Module._mu_rbutton) Module._mu_rbutton(1);
+
+        sweepTicks++;
+        // A cada ~9 segundos (150 ticks * 60ms = 9000ms), ativa o Micro-Passo / Aggro Pulse
+        if (sweepTicks >= 150) {
+          sweepTicks = 0;
+          state = 'STEP_OUT';
+          subTicks = 0;
+          pulseCycle++;
+
+          // Alterna direções de micro-passo: direita, esquerda, diagonal sudeste, diagonal sudoeste
+          var dirs = [
+            { x: 55, y: 0 },
+            { x: -55, y: 0 },
+            { x: 35, y: 25 },
+            { x: -35, y: 25 }
+          ];
+          var d = dirs[pulseCycle % dirs.length];
+          stepDirX = d.x;
+          stepDirY = d.y;
+
+          // Solta o botão direito durante o micro-passo
+          if (Module._mu_rbutton) Module._mu_rbutton(0);
+        }
+      } else if (state === 'STEP_OUT') {
+        // 2. Micro-passo para acordar o aggro dos monstros no viewport
+        if (Module._mu_stick) Module._mu_stick(stepDirX, stepDirY);
+        subTicks++;
+        // Move por ~240ms (4 ticks de 60ms)
+        if (subTicks >= 4) {
+          state = 'STEP_BACK';
+          subTicks = 0;
+        }
+      } else if (state === 'STEP_BACK') {
+        // Retorna imediatamente para o spot original
+        if (Module._mu_stick) Module._mu_stick(-stepDirX, -stepDirY);
+        subTicks++;
+        // Retorna por ~240ms (4 ticks de 60ms)
+        if (subTicks >= 4) {
+          if (Module._mu_stick) Module._mu_stick(0, 0); // Para o movimento
+          state = 'SWEEP';
+          subTicks = 0;
+        }
       }
-    }, 120);
-    window.muShowToast("Auto-Attack: ACTIVE (Center Targeting)");
+    }, 60);
+
+    window.muShowToast("Auto-Attack: SMART SWEEP 360° + AGGRO PULSE ACTIVE");
   } else {
     if (window.muAutoAttackInterval) {
       clearInterval(window.muAutoAttackInterval);
       window.muAutoAttackInterval = null;
     }
-    if (typeof Module !== 'undefined' && Module._mu_rbutton) {
-      Module._mu_rbutton(0);
+    if (typeof Module !== 'undefined') {
+      if (Module._mu_rbutton) Module._mu_rbutton(0);
+      if (Module._mu_stick) Module._mu_stick(0, 0);
+      if (Module._mu_cursor) Module._mu_cursor(MU_CENTER_X, MU_CENTER_Y);
     }
     window.muShowToast("Auto-Attack: STOPPED");
   }
