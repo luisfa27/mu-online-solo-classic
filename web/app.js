@@ -630,8 +630,8 @@ window.muAutoAttackActive = false;
 window.muAutoAttackInterval = null;
 
 // Smart Auto-Attack Parameters
-var MU_SWEEP_RADIUS_X = 75; // Isometric horizontal radius in pixels
-var MU_SWEEP_RADIUS_Y = 48; // Isometric vertical radius in pixels (compressed for 45 deg tilt)
+var MU_SWEEP_RADIUS_X = 65; // Isometric horizontal radius in pixels
+var MU_SWEEP_RADIUS_Y = 40; // Isometric vertical radius in pixels
 var MU_CENTER_X = 320;
 var MU_CENTER_Y = 240;
 
@@ -648,9 +648,9 @@ window.muToggleAutoAttack = function () {
   if (playIcon) playIcon.style.display = on ? 'none' : 'block';
   if (stopIcon) stopIcon.style.display = on ? 'block' : 'none';
   if (textSpan) textSpan.textContent = on ? 'Stop' : 'Auto';
-  if (btn) btn.title = on ? 'Stop Auto-Attack (Smart Sweep 360° + Aggro Pulse)' : 'Start Auto-Attack (Smart Sweep 360° + Aggro Pulse)';
+  if (btn) btn.title = on ? 'Stop Auto-Attack (Triangular 8-Hit Cycle)' : 'Start Auto-Attack (Triangular 8-Hit Cycle)';
 
-  // Disable static C++ center lock so our smart cursor sweep has full authority
+  // Disable static C++ center lock
   if (typeof Module !== 'undefined' && Module._mu_auto_attack) {
     Module._mu_auto_attack(0);
   }
@@ -659,71 +659,59 @@ window.muToggleAutoAttack = function () {
     if (window.muAutoAttackInterval) clearInterval(window.muAutoAttackInterval);
 
     var angle = 0;
-    var state = 'SWEEP'; // 'SWEEP', 'STEP_OUT', 'STEP_BACK'
-    var subTicks = 0;
-    var sweepTicks = 0;
-    var pulseCycle = 0;
-    var stepDirX = 50;
-    var stepDirY = 0;
+    var state = 'ATTACKING'; // 'ATTACKING' | 'MOVING'
+    var attackTicks = 0;
+    var moveTicks = 0;
+    var triangleStep = 0; // 0: Base -> Vertice A, 1: A -> Vertice B, 2: B -> Retorno a Base
 
-    // 60ms loop (~16.6 iterations per second for smooth rotation)
+    // Triangulo isométrico fechado: soma dos 3 vetores é exatamente (0, 0)
+    // Micro-passo curto (~1 tile) para não afastar do spot
+    var triangleVectors = [
+      { dx: 30, dy: -18 }, // Movimentação 1: 1 passo na diagonal nordeste
+      { dx: -60, dy: 0 },  // Movimentação 2: 1 passo para oeste
+      { dx: 30, dy: 18 }   // Movimentação 3: Retorno exato à base original
+    ];
+
+    // Tick a cada 70ms (~14 ticks por segundo)
+    // 8 ataques ~= 16 ticks (~1.12 segundos atacando em cada ponto)
     window.muAutoAttackInterval = setInterval(function () {
       if (!window.muAutoAttackActive || typeof Module === 'undefined') return;
 
-      if (state === 'SWEEP') {
-        // 1. Varredura Circular (Sweep 360°) com projeção isométrica
-        angle = (angle + 0.35) % (Math.PI * 2);
+      if (state === 'ATTACKING') {
+        // Varredura circular 360° com projeção isométrica
+        angle = (angle + 0.40) % (Math.PI * 2);
         var curX = Math.round(MU_CENTER_X + Math.cos(angle) * MU_SWEEP_RADIUS_X);
         var curY = Math.round(MU_CENTER_Y + Math.sin(angle) * MU_SWEEP_RADIUS_Y);
 
         if (Module._mu_cursor) Module._mu_cursor(curX, curY);
         if (Module._mu_rbutton) Module._mu_rbutton(1);
 
-        sweepTicks++;
-        // A cada ~9 segundos (150 ticks * 60ms = 9000ms), ativa o Micro-Passo / Aggro Pulse
-        if (sweepTicks >= 150) {
-          sweepTicks = 0;
-          state = 'STEP_OUT';
-          subTicks = 0;
-          pulseCycle++;
+        attackTicks++;
+        // 16 ticks de 70ms = ~8 ataques executados
+        if (attackTicks >= 16) {
+          attackTicks = 0;
+          state = 'MOVING';
+          moveTicks = 0;
 
-          // Alterna direções de micro-passo: direita, esquerda, diagonal sudeste, diagonal sudoeste
-          var dirs = [
-            { x: 55, y: 0 },
-            { x: -55, y: 0 },
-            { x: 35, y: 25 },
-            { x: -35, y: 25 }
-          ];
-          var d = dirs[pulseCycle % dirs.length];
-          stepDirX = d.x;
-          stepDirY = d.y;
-
-          // Solta o botão direito durante o micro-passo
+          // Solta o ataque antes do micro-passo
           if (Module._mu_rbutton) Module._mu_rbutton(0);
         }
-      } else if (state === 'STEP_OUT') {
-        // 2. Micro-passo para acordar o aggro dos monstros no viewport
-        if (Module._mu_stick) Module._mu_stick(stepDirX, stepDirY);
-        subTicks++;
-        // Move por ~240ms (4 ticks de 60ms)
-        if (subTicks >= 4) {
-          state = 'STEP_BACK';
-          subTicks = 0;
-        }
-      } else if (state === 'STEP_BACK') {
-        // Retorna imediatamente para o spot original
-        if (Module._mu_stick) Module._mu_stick(-stepDirX, -stepDirY);
-        subTicks++;
-        // Retorna por ~240ms (4 ticks de 60ms)
-        if (subTicks >= 4) {
-          if (Module._mu_stick) Module._mu_stick(0, 0); // Para o movimento
-          state = 'SWEEP';
-          subTicks = 0;
+      } else if (state === 'MOVING') {
+        var vec = triangleVectors[triangleStep];
+        if (Module._mu_stick) Module._mu_stick(vec.dx, vec.dy);
+
+        moveTicks++;
+        // Micro-impulso rápido de apenas 2 ticks (~140ms, apenas 1 passo)
+        if (moveTicks >= 2) {
+          if (Module._mu_stick) Module._mu_stick(0, 0); // Para imediatamente o movimento
+          triangleStep = (triangleStep + 1) % 3; // Avança para o próximo vértice (retorna à base a cada 3)
+          state = 'ATTACKING';
+          moveTicks = 0;
         }
       }
-    }, 60);
+    }, 70);
 
-    window.muShowToast("Auto-Attack: SMART SWEEP 360° + AGGRO PULSE ACTIVE");
+    window.muShowToast("Auto-Attack: TRIANGULAR 8-HIT CYCLE ACTIVE");
   } else {
     if (window.muAutoAttackInterval) {
       clearInterval(window.muAutoAttackInterval);
