@@ -696,6 +696,11 @@ float10 __cdecl CharacterMoveSpeed(int c)
       result = 16.0;
       goto LABEL_12;
     }
+    if ( v3 == 819 )
+    {
+      result = 30.0; // Dinorant 2x faster (de 15.0 para 30.0)
+      goto LABEL_12;
+    }
   }
   result = 15.0;
 LABEL_12:

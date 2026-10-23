@@ -330,6 +330,31 @@ async function initServer(initialSaves = null, difficulty = 0) {
 
         Module._SoloServer_SetSaveCallback(saveCallback);
 
+        // Apply custom skill modifications to virtual filesystem (/Data/Skill/Skill.txt)
+        try {
+            if (Module.FS && Module.FS.analyzePath('/Data/Skill/Skill.txt').exists) {
+                let skillData = Module.FS.readFile('/Data/Skill/Skill.txt', { encoding: 'utf8' });
+                let lines = skillData.split('\n');
+                let patched = false;
+                for (let i = 0; i < lines.length; i++) {
+                    let trimL = lines[i].trim();
+                    if (trimL.startsWith('42\t') || trimL.startsWith('42 ') || trimL.includes('"Rageful Blow"')) {
+                        lines[i] = '42\t"Rageful Blow"\t\t\t60\t25\t20\t6\t6\t0\t4\t0\t0\t0\t0\t2\t0\t0';
+                        patched = true;
+                        break;
+                    }
+                }
+                if (patched) {
+                    Module.FS.writeFile('/Data/Skill/Skill.txt', lines.join('\n'));
+                    log('[Worker] Custom Skill Patch: Rageful Blow Range=6, Radio=6 aplicado com sucesso!', '#34d399');
+                } else {
+                    log('[Worker] Skill patch warning: linha do Rageful Blow não encontrada em /Data/Skill/Skill.txt', '#f59e0b');
+                }
+            }
+        } catch (patchErr) {
+            log(`[Worker] Skill patch notice: ${patchErr.message}`, '#f59e0b');
+        }
+
         log('[Worker] Initializing Game World and Data Files (/Data)...', '#a78bfa');
         let initResult = 0;
         try {

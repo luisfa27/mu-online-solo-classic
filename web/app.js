@@ -629,9 +629,7 @@ window.muShowToast = function (msg, duration) {
 window.muAutoAttackActive = false;
 window.muAutoAttackInterval = null;
 
-// Smart Auto-Attack Parameters
-var MU_SWEEP_RADIUS_X = 65; // Isometric horizontal radius in pixels
-var MU_SWEEP_RADIUS_Y = 40; // Isometric vertical radius in pixels
+// Auto-Ataque Estático no Pé do Personagem (320, 240)
 var MU_CENTER_X = 320;
 var MU_CENTER_Y = 240;
 
@@ -648,70 +646,31 @@ window.muToggleAutoAttack = function () {
   if (playIcon) playIcon.style.display = on ? 'none' : 'block';
   if (stopIcon) stopIcon.style.display = on ? 'block' : 'none';
   if (textSpan) textSpan.textContent = on ? 'Stop' : 'Auto';
-  if (btn) btn.title = on ? 'Stop Auto-Attack (Triangular 8-Hit Cycle)' : 'Start Auto-Attack (Triangular 8-Hit Cycle)';
+  if (btn) btn.title = on ? 'Stop Auto-Attack (Static at Feet)' : 'Start Auto-Attack (Static at Feet)';
 
-  // Disable static C++ center lock
+  // Reativa o auto-ataque nativo no C++ se disponível
   if (typeof Module !== 'undefined' && Module._mu_auto_attack) {
-    Module._mu_auto_attack(0);
+    Module._mu_auto_attack(on ? 1 : 0);
+  }
+
+  // Garante movimento zerado
+  if (typeof Module !== 'undefined' && Module._mu_stick) {
+    Module._mu_stick(0, 0);
   }
 
   if (on) {
+    if (typeof Module !== 'undefined') {
+      if (Module._mu_cursor) Module._mu_cursor(MU_CENTER_X, MU_CENTER_Y);
+      if (Module._mu_rbutton) Module._mu_rbutton(1);
+    }
     if (window.muAutoAttackInterval) clearInterval(window.muAutoAttackInterval);
-
-    var angle = 0;
-    var state = 'ATTACKING'; // 'ATTACKING' | 'MOVING'
-    var attackTicks = 0;
-    var moveTicks = 0;
-    var triangleStep = 0; // 0: Base -> Vertice A, 1: A -> Vertice B, 2: B -> Retorno a Base
-
-    // Triangulo isométrico fechado: soma dos 3 vetores é exatamente (0, 0)
-    // Micro-passo curto (~1 tile) para não afastar do spot
-    var triangleVectors = [
-      { dx: 30, dy: -18 }, // Movimentação 1: 1 passo na diagonal nordeste
-      { dx: -60, dy: 0 },  // Movimentação 2: 1 passo para oeste
-      { dx: 30, dy: 18 }   // Movimentação 3: Retorno exato à base original
-    ];
-
-    // Tick a cada 70ms (~14 ticks por segundo)
-    // 8 ataques ~= 16 ticks (~1.12 segundos atacando em cada ponto)
     window.muAutoAttackInterval = setInterval(function () {
       if (!window.muAutoAttackActive || typeof Module === 'undefined') return;
+      if (Module._mu_cursor) Module._mu_cursor(MU_CENTER_X, MU_CENTER_Y);
+      if (Module._mu_rbutton) Module._mu_rbutton(1);
+    }, 100);
 
-      if (state === 'ATTACKING') {
-        // Varredura circular 360° com projeção isométrica
-        angle = (angle + 0.40) % (Math.PI * 2);
-        var curX = Math.round(MU_CENTER_X + Math.cos(angle) * MU_SWEEP_RADIUS_X);
-        var curY = Math.round(MU_CENTER_Y + Math.sin(angle) * MU_SWEEP_RADIUS_Y);
-
-        if (Module._mu_cursor) Module._mu_cursor(curX, curY);
-        if (Module._mu_rbutton) Module._mu_rbutton(1);
-
-        attackTicks++;
-        // 16 ticks de 70ms = ~8 ataques executados
-        if (attackTicks >= 16) {
-          attackTicks = 0;
-          state = 'MOVING';
-          moveTicks = 0;
-
-          // Solta o ataque antes do micro-passo
-          if (Module._mu_rbutton) Module._mu_rbutton(0);
-        }
-      } else if (state === 'MOVING') {
-        var vec = triangleVectors[triangleStep];
-        if (Module._mu_stick) Module._mu_stick(vec.dx, vec.dy);
-
-        moveTicks++;
-        // Micro-impulso rápido de apenas 2 ticks (~140ms, apenas 1 passo)
-        if (moveTicks >= 2) {
-          if (Module._mu_stick) Module._mu_stick(0, 0); // Para imediatamente o movimento
-          triangleStep = (triangleStep + 1) % 3; // Avança para o próximo vértice (retorna à base a cada 3)
-          state = 'ATTACKING';
-          moveTicks = 0;
-        }
-      }
-    }, 70);
-
-    window.muShowToast("Auto-Attack: TRIANGULAR 8-HIT CYCLE ACTIVE");
+    window.muShowToast("Auto-Attack: ATIVO (Estático no pé do char)");
   } else {
     if (window.muAutoAttackInterval) {
       clearInterval(window.muAutoAttackInterval);
@@ -719,7 +678,6 @@ window.muToggleAutoAttack = function () {
     }
     if (typeof Module !== 'undefined') {
       if (Module._mu_rbutton) Module._mu_rbutton(0);
-      if (Module._mu_stick) Module._mu_stick(0, 0);
       if (Module._mu_cursor) Module._mu_cursor(MU_CENTER_X, MU_CENTER_Y);
     }
     window.muShowToast("Auto-Attack: STOPPED");
